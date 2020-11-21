@@ -118,10 +118,6 @@ def matrix_streaks(m: List) -> List:
     return sorted([x for x in streaks if not any(x.issubset(s) for s in streaks if s != x)])
 
 
-
-
-
-
 # def print_streaks(m, sx):
 #     for streak in sx:
 #         for cell in sorted(streak, key=lambda e: e[1]):
@@ -154,8 +150,6 @@ def update_from_streak(m: List, streak: List) -> object:
 def matrix_update(m: List, mm: object) -> object:
     streaks = matrix_streaks(m)
     if len(streaks) > 0:
-        # relevant_streak = random.choice(streaks)
-        # return update_from_streak(m, mm, relevant_streak)
         for i, streak in enumerate(streaks):
             color = COLORS[(i % len(COLORS))]
             for cell in streak:
@@ -190,7 +184,7 @@ def possible_streaks(m: List) -> List:
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
                 candidates.add(frozenset({c,(m[n[1]][n[2]],n[1],n[2])}))
     # print(candidates)
-    return candidates
+    return sorted([c for c in candidates])
 
 
 def char_colors(x, y, m, mm) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
@@ -226,13 +220,13 @@ def matrix_tcod(console, m: List, mm: List, streaks: List = None) -> None:
     if None == streaks:
         streaks = matrix_streaks(m)
     for i, streak in enumerate(streaks):
-        xmin = min([cell[1] for cell in streak])
-        xmax = max([cell[1] for cell in streak])
-        ymin = min([cell[2] for cell in streak])
-        ymax = max([cell[2] for cell in streak])
+        xmin: int = min([cell[1] for cell in streak])
+        xmax: int = max([cell[1] for cell in streak])
+        ymin: int = min([cell[2] for cell in streak])
+        ymax: int = max([cell[2] for cell in streak])
         x1,y1 = mxy(xmin,ymin)
         x2,y2 = mxy(xmax,ymax)
-        print(xmin,ymin,xmax,ymax)
+        # print(xmin,ymin,xmax,ymax)
         console.draw_frame(x1 - 1 , y1 - 1 , x2 - x1 + 3, y2 - y1 + 3, str(i), clear=False)
     for j in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
