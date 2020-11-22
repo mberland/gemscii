@@ -9,47 +9,69 @@ import random
 from copy import deepcopy
 from typing import Tuple, List
 import tcod
-from tcod.event import K_9,K_0
+from tcod.event import K_9, K_0
 from enum import Enum
-import os
+from collections import deque
 
 gems = "ABCDEF"
 MATRIX_WIDTH = 9
 MATRIX_HEIGHT = 4
 
 
-class CellState(Enum):
-    INVALID = -1,
-    UNKNOWN = 0,
-    DEADCELL = 1,
-    NEWCELL = 2
+class Event(Enum):
+    UNKNOWN = -99,
+    KILLED = 10,
+    BORN = 11,
+    EXPLODE = 12
+
+
+class Trigger:
+    _cells: List
+    _event: Event
+    _stage: int
+    _max_stage: int
+
+    def __init__(self, cells: List, event: Event, stage: int, max_stage: int):
+        self._cells = cells
+        self._event = event
+        self._stage = stage
+        self._max_stage = max_stage
+
+    def __str__(self):
+        return "TRIGGER_{} ({} -> {}): {}".format(self._event,self._stage,self._max_stage,self._cells)
+
+
+def create_trigger(cells: List, event: Event, stage: int, max_stage: int):
+    GLOBAL_EVENT_QUEUE.append(Trigger(cells,event,stage,max_stage))
 
 
 COLOR_MAP = dict(
-    {"RED": (255, 0, 0),
+    {"BLACK": (0, 0, 0),
+     "WHITE": (255, 255, 255),
+     "RED": (255, 0, 0),
      "GREEN": (0, 255, 0),
      "PURPLE": (255, 0, 255),
-     "ORANGE": (255,127,0),
-     "PINK": (255,0,127),
+     "ORANGE": (255, 127, 0),
+     "PINK": (255, 0, 127),
      "YELLOW": (255, 255, 0),
      "CYAN": (0, 255, 255),
      "BLUE": (0, 0, 255),
-     "BLACK": (0, 0, 0),
-     "WHITE": (255, 255, 255)})
+     })
 
+COLORS = list(COLOR_MAP.keys())[2:]
 
-COLORS = list(COLOR_MAP.keys())[:-2]
+GLOBAL_EVENT_QUEUE = deque()
 
 
 def color_string(foreground: str, background: str):
     return COLOR_MAP[foreground], COLOR_MAP[background]
 
 
-def valid_x(x):
+def valid_x(x) -> bool:
     return 0 <= x < MATRIX_WIDTH
 
 
-def valid_y(y):
+def valid_y(y) -> bool:
     return 0 <= y < MATRIX_HEIGHT
 
 
@@ -61,8 +83,8 @@ def init_matrix() -> List:
     return [[random.choice(gems) for _ in range(MATRIX_HEIGHT)] for _ in range(MATRIX_WIDTH)]
 
 
-def meta_matrix() -> dict:
-    return {i: {j: {} for j in range(MATRIX_HEIGHT)} for i in range(MATRIX_WIDTH)}
+# def meta_matrix() -> dict:
+#     return {i: {j: {} for j in range(MATRIX_HEIGHT)} for i in range(MATRIX_WIDTH)}
 
 
 def elt(m, x, y):
@@ -71,13 +93,13 @@ def elt(m, x, y):
     return None
 
 
-def display(c="|", i=-1, j=-1):
-    if i < 0 or j < 0:
-        print("", end="\n")
-    elif len(c) == 1:
-        print("{:5s}".format(c), end="")
-    else:
-        print("{:5s}".format(c), end="")
+# def display(c="|", i=-1, j=-1):
+#     if i < 0 or j < 0:
+#         print("", end="\n")
+#     elif len(c) == 1:
+#         print("{:5s}".format(c), end="")
+#     else:
+#         print("{:5s}".format(c), end="")
 
 
 # def print_matrix(m):
@@ -126,8 +148,7 @@ def matrix_streaks(m: List) -> List:
 #     print_matrix(m)
 
 
-def matrix_fill(m: List) -> object:
-    mm = meta_matrix()
+def matrix_fill(m: List) -> List:
     for _ in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
             for j in range(MATRIX_HEIGHT):
@@ -137,69 +158,69 @@ def matrix_fill(m: List) -> object:
                         m[i][j + 1] = new_gem()
                     else:
                         m[i][j] = new_gem()
-    return m, mm
+    return m
 
 
-def update_from_streak(m: List, streak: List) -> object:
+def update_from_streak(m: List, streak: List) -> List:
     for cell in streak:
         _, cx, cy = cell
         m[cx][cy] = "#"
     return m
 
 
-def matrix_update(m: List, mm: object) -> object:
+def update_swap_streak(m: List, streak: List) -> List:
+    ce1, cx1, cy1 = streak[0]
+    ce2, cx2, cy2 = streak[1]
+    m[cx1][cy1] = ce2
+    m[cx2][cy2] = ce1
+    return m
+
+
+def matrix_update(m: List) -> List:
     streaks = matrix_streaks(m)
     if len(streaks) > 0:
         for i, streak in enumerate(streaks):
-            color = COLORS[(i % len(COLORS))]
             for cell in streak:
                 _, cx, cy = cell
-                mm[cx][cy]["color"] = color
-    return m, mm
+    return m
 
 
-def complete_all_streaks(m: List) -> Tuple[List, dict]:
+def complete_all_streaks(m: List) -> List:
     streaks = matrix_streaks(m)
-    mm = meta_matrix()
     while len(streaks) > 0:
         m = update_from_streak(m, streaks[0])
-        m, mm = matrix_fill(m)
+        m = matrix_fill(m)
         streaks = matrix_streaks(m)
-    return m, mm
+    return m
 
 
 def possible_streaks(m: List) -> List:
     candidates = set()
-    m, mm = complete_all_streaks(m)
+    m = complete_all_streaks(m)
     deltas = [(i, j) for i in range(-1, 2) for j in range(-1, 2) if abs(i) != abs(j)]
     cells = [(m[i][j], i, j) for j in range(1, MATRIX_HEIGHT - 1) for i in range(1, MATRIX_WIDTH - 1)]
     for c in cells:
-        neighbors = [("?",(d[0] + c[1]),(d[1] + c[2])) for d in deltas]
+        neighbors = [("?", (d[0] + c[1]), (d[1] + c[2])) for d in deltas]
         for n in neighbors:
             neighbor_switch_matrix = deepcopy(m)
-            # if len(matrix_streaks(neighbor_switch_matrix)) > 0:
-            #     assert False, "streaks exist?"
+            if len(matrix_streaks(neighbor_switch_matrix)) > 0:
+                assert False, "streaks exist?"
             neighbor_switch_matrix[n[1]][n[2]] = m[c[1]][c[2]]
             neighbor_switch_matrix[c[1]][c[2]] = m[n[1]][n[2]]
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
-                candidates.add(frozenset({c,(m[n[1]][n[2]],n[1],n[2])}))
+                candidates.add(frozenset({c, (m[n[1]][n[2]], n[1], n[2])}))
     # print(candidates)
     return sorted([c for c in candidates])
 
 
-def char_colors(x, y, m, mm) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
-    meta_info = mm[x][y]
+def char_colors(x, y, m) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
     cell_info = m[x][y]
     fg = "WHITE"
     bg = "BLACK"
     if "#" == cell_info:
         fg = "WHITE"
         bg = "RED"
-    if "bgcolor" in meta_info:
-        bg = meta_info["bgcolor"]
-    if "color" in meta_info:
-        fg = meta_info["color"]
-    return color_string(fg,bg)
+    return color_string(fg, bg)
 
 
 WINDOW_WIDTH = MATRIX_WIDTH * 8
@@ -210,30 +231,35 @@ X_START: int = 2 * X_BUFFER
 Y_START: int = Y_BUFFER
 
 
-def mxy(i: int, j: int) -> Tuple[int,int]:
+def mxy(i: int, j: int) -> Tuple[int, int]:
     x = X_START + i * X_BUFFER
     y = Y_START + j * Y_BUFFER
     return x, y
 
 
-def matrix_tcod(console, m: List, mm: List, streaks: List = None) -> None:
-    if None == streaks:
+def matrix_tcod(console, m: List, streaks: List = None) -> None:
+    if streaks is None:
         streaks = matrix_streaks(m)
     for i, streak in enumerate(streaks):
         xmin: int = min([cell[1] for cell in streak])
         xmax: int = max([cell[1] for cell in streak])
         ymin: int = min([cell[2] for cell in streak])
         ymax: int = max([cell[2] for cell in streak])
-        x1,y1 = mxy(xmin,ymin)
-        x2,y2 = mxy(xmax,ymax)
+        x1, y1 = mxy(xmin, ymin)
+        x2, y2 = mxy(xmax, ymax)
         # print(xmin,ymin,xmax,ymax)
-        console.draw_frame(x1 - 1 , y1 - 1 , x2 - x1 + 3, y2 - y1 + 3, str(i), clear=False)
+        console.draw_frame(x1 - 1, y1 - 1, x2 - x1 + 3, y2 - y1 + 3, str(i), clear=False)
     for j in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
-            cx, cy = mxy(i,j)
+            cx, cy = mxy(i, j)
             ce = m[i][j]
-            fg, bg = char_colors(i, j, m, mm)
+            fg, bg = char_colors(i, j, m)
             console.print_box(x=cx, y=cy, string=ce, fg=fg, bg=bg, width=1, height=1)
+
+
+def enact_global_event():
+    if GLOBAL_EVENT_QUEUE.count() > 0:
+        print("GLOBAL_EVENT_QUEUE ENACTING: ",GLOBAL_EVENT_QUEUE.popleft())
 
 
 def main() -> None:
@@ -241,16 +267,16 @@ def main() -> None:
     tileset = tcod.tileset.load_tilesheet("dejavu12x12_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD)
     console = tcod.Console(WINDOW_WIDTH, WINDOW_HEIGHT)
     matrix = init_matrix()
-    meta = meta_matrix()
     # print_matrix(matrix)
 
     # os.environ["SDL_RENDER_DRIVER"] = "software"
-    with tcod.context.new(columns=console.width, rows=console.height, tileset=tileset, renderer=tcod.context.RENDERER_SDL2) as context:
+    with tcod.context.new(columns=console.width, rows=console.height, tileset=tileset,
+                          renderer=tcod.context.RENDERER_SDL2) as context:
         console.clear()
-        matrix_tcod(console, matrix, meta)
+        matrix_tcod(console, matrix)
         context.present(console)
         while True:  # Main loop, runs until SystemExit is raised.
-            for event in tcod.event.wait():
+            for event in tcod.event.wait(1):
                 # print(event)
                 # context.convert_event(event)  # Sets tile coordinates for mouse events.
 
@@ -262,28 +288,28 @@ def main() -> None:
                     console.clear()
 
                     if event.sym == tcod.event.K_f:
-                        matrix, meta = complete_all_streaks(matrix)
+                        matrix = complete_all_streaks(matrix)
                         # matrix, meta = matrix_update(matrix, meta)
-                        matrix_tcod(console, matrix, meta, possible_streaks(matrix))
+                        matrix_tcod(console, matrix, possible_streaks(matrix))
                     else:
                         # if event.sym == tcod.event.K_d:
                         #     matrix, meta = matrix_update(matrix, meta)
                         if event.sym == tcod.event.K_s:
-                            matrix, meta = complete_all_streaks(matrix)
+                            matrix = complete_all_streaks(matrix)
                         if event.sym == tcod.event.K_a:
-                            matrix, meta = matrix_fill(matrix)
+                            matrix = matrix_fill(matrix)
                         if event.sym == tcod.event.K_r:
                             matrix = init_matrix()
-                            meta = meta_matrix()
+                            # meta = meta_matrix()
                         if K_0 <= event.sym <= K_9:
                             s_num = event.sym - K_0
-                            streaks = matrix_streaks(matrix)
+                            streaks = matrix_streaks(matrix) # change to possible
                             if s_num < len(streaks):
                                 matrix = update_from_streak(matrix, streaks[s_num])
-                                matrix, meta = matrix_fill(matrix)
+                                matrix = matrix_fill(matrix)
 
-                        matrix, meta = matrix_update(matrix, meta)
-                        matrix_tcod(console, matrix, meta)
+                        matrix = matrix_update(matrix)
+                        matrix_tcod(console, matrix)
 
                     context.present(console)
                 if event.type == "QUIT":
