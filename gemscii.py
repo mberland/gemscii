@@ -208,7 +208,7 @@ def possible_streaks(m: List) -> List:
             neighbor_switch_matrix[n[1]][n[2]] = m[c[1]][c[2]]
             neighbor_switch_matrix[c[1]][c[2]] = m[n[1]][n[2]]
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
-                candidates.add(frozenset({c, (m[n[1]][n[2]], n[1], n[2])}))
+                candidates.add(tuple(sorted([c, (m[n[1]][n[2]], n[1], n[2])])))
     # print(candidates)
     return sorted([c for c in candidates])
 
@@ -303,10 +303,10 @@ def main() -> None:
                             # meta = meta_matrix()
                         if K_0 <= event.sym <= K_9:
                             s_num = event.sym - K_0
-                            streaks = matrix_streaks(matrix) # change to possible
+                            streaks = possible_streaks(matrix)
                             if s_num < len(streaks):
-                                matrix = update_from_streak(matrix, streaks[s_num])
-                                matrix = matrix_fill(matrix)
+                                matrix = update_swap_streak(matrix, streaks[s_num])
+                                matrix = complete_all_streaks(matrix)
 
                         matrix = matrix_update(matrix)
                         matrix_tcod(console, matrix)
