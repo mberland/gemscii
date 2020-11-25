@@ -5,12 +5,15 @@
 # . . X X . # # % X X # .
 # % . % % X * % X # * % #
 # * X . % # * * # X . X X
-import random, tcod, time
-from copy import deepcopy
-from typing import Tuple, List
-from tcod.event import K_9, K_0
-from enum import Enum
+import random
+import tcod
+import time
 from collections import deque
+from copy import deepcopy
+from enum import Enum
+from typing import Tuple, List
+
+from tcod.event import K_9, K_0
 
 gems = "ABCDEF"
 MATRIX_WIDTH = 9
@@ -63,6 +66,10 @@ class Event:
     def do_swap(self, matrix):
         assert False, f"TRIED TO CALL SWAP ON NON-SWAP EVENT: {self._event_type}"
         pass
+
+    @property
+    def event_type(self):
+        return self._event_type
 
 
 DEFAULT_EVENT = Event([], EventType.NO_EVENT)
@@ -267,7 +274,7 @@ class Swap(Event):
     def do_swap(self, m: List) -> List:
         cx1, cy1 = self._ca
         cx2, cy2 = self._cb
-        streak = tuple([tuple([m[cx1][cy1],cx1,cy1]),tuple([m[cx2][cy2],cx2,cy2])])
+        streak = tuple([tuple([str(m[cx1][cy1]), cx1, cy1]), tuple([str(m[cx2][cy2]), cx2, cy2])])
         m = update_swap_streak(m, streak)
         m = complete_all_streaks(m)
         return m
@@ -336,7 +343,7 @@ def main() -> None:
             console.clear()
             event = event_go()
             if not event.completed():
-                if EventType.SWAP == event._event_type:
+                if EventType.SWAP == event.event_type:
                     matrix = event.do_swap(matrix)
             matrix = complete_all_streaks(matrix)
             matrix = matrix_fill(matrix)
@@ -359,7 +366,8 @@ def main() -> None:
                             _, cx1, cy1 = streak[0]
                             _, cx2, cy2 = streak[1]
                             event_create(Swap([(cx1, cy1), (cx2, cy2)], EventType.SWAP))
-                            event_create(Animation([(cx1, cy1), (cx2, cy2)], EventType.ANIMATE, ["RED", "BLUE", "GREEN", "PURPLE"]))
+                            event_create(Animation([(cx1, cy1), (cx2, cy2)], EventType.ANIMATE,
+                                                   ["RED", "BLUE", "GREEN", "PURPLE"]))
                     else:
                         print(f"BAD KEY: {event}")
 
