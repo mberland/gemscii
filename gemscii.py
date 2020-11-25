@@ -16,33 +16,96 @@ from collections import deque
 gems = "ABCDEF"
 MATRIX_WIDTH = 9
 MATRIX_HEIGHT = 4
+COLOR_MATRIX_FG = []
+COLOR_MATRIX_BG = []
 
 
-class Event(Enum):
+def reset_color_matrix(c: str) -> List:
+    return [[c for _ in range(MATRIX_HEIGHT)] for _ in range(MATRIX_WIDTH)]
+
+
+def reset_color_matrices() -> None:
+    global COLOR_MATRIX_BG, COLOR_MATRIX_FG
+    COLOR_MATRIX_FG = reset_color_matrix("WHITE")
+    COLOR_MATRIX_BG = reset_color_matrix("BLACK")
+
+
+reset_color_matrices()
+
+
+class EventType(Enum):
     UNKNOWN = -99,
     KILLED = 10,
     BORN = 11,
-    EXPLODE = 12
+    EXPLODE = 12,
+    ANIMATE = 13
 
 
-class Trigger:
+class Event:
     _cells: List
-    _event: Event
+    _event_type: EventType
+
+    def __init__(self, cells: List, event_type: EventType):
+        self._cells = cells
+        self._event_type = event_type
+
+    def go(self) -> None:
+        print(self)
+
+    def __str__(self):
+        print("UNDEFINED EVENT")
+
+
+def event_create(event: Event):
+    GLOBAL_EVENT_QUEUE.append(event)
+
+
+def event_go():
+    if len(GLOBAL_EVENT_QUEUE) > 0:
+        event = GLOBAL_EVENT_QUEUE.popleft()
+        event.go()
+    else:
+        reset_color_matrices()
+
+
+class Animation(Event):
+    _colors: List
     _stage: int
     _max_stage: int
 
-    def __init__(self, cells: List, event: Event, stage: int, max_stage: int):
-        self._cells = cells
-        self._event = event
+    def __init__(self, cells: List, event_type: EventType, colors: List, stage: int, max_stage: int):
+        super().__init__(cells, event_type)
+        self._colors = colors
         self._stage = stage
         self._max_stage = max_stage
 
+    def go(self):
+        super().go()
+        for cell in self._cells:
+            COLOR_MATRIX_FG[cell[0]][cell[1]] = self._colors[0]
+        if self._stage < self._max_stage:
+            self._colors = self._colors[1:] + self._colors[:1]
+            self._stage += 1
+            event_create(Animation(self._cells,self._event_type,self._colors,self._stage,self._max_stage))
+
     def __str__(self):
-        return "TRIGGER_{} ({} -> {}): {}".format(self._event,self._stage,self._max_stage,self._cells)
+        return "ANIMATION ({} , {}) {} => {}: {}".format(self._cells[0][0], self._cells[0][1], self._stage,
+                                                         self._max_stage, self._colors)
 
 
-def create_trigger(cells: List, event: Event, stage: int, max_stage: int):
-    GLOBAL_EVENT_QUEUE.append(Trigger(cells,event,stage,max_stage))
+class Trigger(Event):
+
+    def __init__(self, cells: List, event_type: EventType):
+        super().__init__(cells, event_type)
+
+    def go(self):
+        super().go()
+        if EventType.ANIMATE == self._event_type:
+            event = Animation(self._cells, self._event_type, ["RED", "BLUE"], 0, 5)
+            event_create(event)
+
+    def __str__(self):
+        return "TRIGGER_{}: {}".format(self._event_type, self._cells)
 
 
 COLOR_MAP = dict(
@@ -213,13 +276,15 @@ def possible_streaks(m: List) -> List:
     return sorted([c for c in candidates])
 
 
-def char_colors(x, y, m) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
-    cell_info = m[x][y]
-    fg = "WHITE"
-    bg = "BLACK"
-    if "#" == cell_info:
-        fg = "WHITE"
-        bg = "RED"
+def char_colors(x: int, y: int) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
+    print("({},{}): ".format(x,y),end="")
+    fg = COLOR_MATRIX_FG[x][y]
+    bg = COLOR_MATRIX_BG[x][y]
+    print("FG = {} , BG = {}".format(fg,bg))
+    # fg = "WHITE"
+    # if "#" == cell_info:
+    #     fg = "WHITE"
+    #     bg = "RED"
     return color_string(fg, bg)
 
 
@@ -253,13 +318,15 @@ def matrix_tcod(console, m: List, streaks: List = None) -> None:
         for i in range(MATRIX_WIDTH):
             cx, cy = mxy(i, j)
             ce = m[i][j]
-            fg, bg = char_colors(i, j, m)
+            fg, bg = char_colors(i, j)
             console.print_box(x=cx, y=cy, string=ce, fg=fg, bg=bg, width=1, height=1)
 
 
-def enact_global_event():
-    if GLOBAL_EVENT_QUEUE.count() > 0:
-        print("GLOBAL_EVENT_QUEUE ENACTING: ",GLOBAL_EVENT_QUEUE.popleft())
+def enact_global_event() -> None:
+    if len(GLOBAL_EVENT_QUEUE) > 0:
+        print("GLOBAL_EVENT_QUEUE ENACTING: ", event_go())
+    else:
+        reset_color_matrices()
 
 
 def main() -> None:
@@ -277,6 +344,8 @@ def main() -> None:
         context.present(console)
         while True:  # Main loop, runs until SystemExit is raised.
             for event in tcod.event.wait(1):
+                event_go()
+                matrix_tcod(console, matrix)
                 # print(event)
                 # context.convert_event(event)  # Sets tile coordinates for mouse events.
 
@@ -305,9 +374,13 @@ def main() -> None:
                             s_num = event.sym - K_0
                             streaks = possible_streaks(matrix)
                             if s_num < len(streaks):
-                                matrix = update_swap_streak(matrix, streaks[s_num])
+                                streak = streaks[s_num]
+                                matrix = update_swap_streak(matrix, streak)
                                 matrix = complete_all_streaks(matrix)
-
+                                _, cx1, cy1 = streak[0]
+                                _, cx2, cy2 = streak[1]
+                                event_create(Animation([(cx1,cy1),(cx2,cy2)],EventType.ANIMATE,["RED","BLUE"],0,5))
+                                # event_go()
                         matrix = matrix_update(matrix)
                         matrix_tcod(console, matrix)
 
