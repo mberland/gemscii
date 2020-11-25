@@ -5,10 +5,9 @@
 # . . X X . # # % X X # .
 # % . % % X * % X # * % #
 # * X . % # * * # X . X X
-import random
+import random, tcod, time
 from copy import deepcopy
 from typing import Tuple, List
-import tcod
 from tcod.event import K_9, K_0
 from enum import Enum
 from collections import deque
@@ -16,6 +15,7 @@ from collections import deque
 gems = "ABCDEF"
 MATRIX_WIDTH = 9
 MATRIX_HEIGHT = 4
+ANIMATION_LENGTH = 5
 COLOR_MATRIX_FG = []
 COLOR_MATRIX_BG = []
 
@@ -35,10 +35,12 @@ reset_color_matrices()
 
 class EventType(Enum):
     UNKNOWN = -99,
+    NO_EVENT = 0,
     KILLED = 10,
     BORN = 11,
     EXPLODE = 12,
-    ANIMATE = 13
+    ANIMATE = 13,
+    SWAP = 14
 
 
 class Event:
@@ -52,20 +54,34 @@ class Event:
     def go(self) -> None:
         print(self)
 
+    def completed(self) -> bool:
+        return True
+
     def __str__(self):
-        print("UNDEFINED EVENT")
+        return f"UNDEFINED EVENT: {self._event_type}"
+
+    def do_swap(self, matrix):
+        assert False, f"TRIED TO CALL SWAP ON NON-SWAP EVENT: {self._event_type}"
+        pass
+
+
+DEFAULT_EVENT = Event([], EventType.NO_EVENT)
 
 
 def event_create(event: Event):
     GLOBAL_EVENT_QUEUE.append(event)
 
 
-def event_go():
+def event_go() -> Event:
+    global DEFAULT_EVENT
     if len(GLOBAL_EVENT_QUEUE) > 0:
+        print("ENACTING")
         event = GLOBAL_EVENT_QUEUE.popleft()
         event.go()
-    else:
-        reset_color_matrices()
+        return event
+    # print("RESETTING...")
+    reset_color_matrices()
+    return DEFAULT_EVENT
 
 
 class Animation(Event):
@@ -73,11 +89,11 @@ class Animation(Event):
     _stage: int
     _max_stage: int
 
-    def __init__(self, cells: List, event_type: EventType, colors: List, stage: int, max_stage: int):
+    def __init__(self, cells: List, event_type: EventType, colors: List, stage: int = 0):
         super().__init__(cells, event_type)
         self._colors = colors
         self._stage = stage
-        self._max_stage = max_stage
+        self._max_stage = ANIMATION_LENGTH
 
     def go(self):
         super().go()
@@ -85,27 +101,11 @@ class Animation(Event):
             COLOR_MATRIX_FG[cell[0]][cell[1]] = self._colors[0]
         if self._stage < self._max_stage:
             self._colors = self._colors[1:] + self._colors[:1]
-            self._stage += 1
-            event_create(Animation(self._cells,self._event_type,self._colors,self._stage,self._max_stage))
+            event_create(Animation(self._cells, self._event_type, self._colors, self._stage + 1))
 
     def __str__(self):
         return "ANIMATION ({} , {}) {} => {}: {}".format(self._cells[0][0], self._cells[0][1], self._stage,
                                                          self._max_stage, self._colors)
-
-
-class Trigger(Event):
-
-    def __init__(self, cells: List, event_type: EventType):
-        super().__init__(cells, event_type)
-
-    def go(self):
-        super().go()
-        if EventType.ANIMATE == self._event_type:
-            event = Animation(self._cells, self._event_type, ["RED", "BLUE"], 0, 5)
-            event_create(event)
-
-    def __str__(self):
-        return "TRIGGER_{}: {}".format(self._event_type, self._cells)
 
 
 COLOR_MAP = dict(
@@ -146,37 +146,10 @@ def init_matrix() -> List:
     return [[random.choice(gems) for _ in range(MATRIX_HEIGHT)] for _ in range(MATRIX_WIDTH)]
 
 
-# def meta_matrix() -> dict:
-#     return {i: {j: {} for j in range(MATRIX_HEIGHT)} for i in range(MATRIX_WIDTH)}
-
-
 def elt(m, x, y):
     if valid_x(x) and valid_y(y):
         return m[x][y]
     return None
-
-
-# def display(c="|", i=-1, j=-1):
-#     if i < 0 or j < 0:
-#         print("", end="\n")
-#     elif len(c) == 1:
-#         print("{:5s}".format(c), end="")
-#     else:
-#         print("{:5s}".format(c), end="")
-
-
-# def print_matrix(m):
-#     new_line = lambda: display()
-#     for j in range(MATRIX_HEIGHT):
-#         new_line()
-#         new_line()
-#         for i in range(MATRIX_WIDTH):
-#             display(c=elt(m, i, j), i=i, j=j)
-#     new_line()
-
-
-# def print_meta(m, meta, streaks):
-#     assert False, "UNIMPLEMENTED"
 
 
 def matrix_streaks(m: List) -> List:
@@ -203,14 +176,6 @@ def matrix_streaks(m: List) -> List:
     return sorted([x for x in streaks if not any(x.issubset(s) for s in streaks if s != x)])
 
 
-# def print_streaks(m, sx):
-#     for streak in sx:
-#         for cell in sorted(streak, key=lambda e: e[1]):
-#             _, x, y = cell
-#             m[x][y] = elt(m, x, y) + "!"
-#     print_matrix(m)
-
-
 def matrix_fill(m: List) -> List:
     for _ in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
@@ -231,7 +196,7 @@ def update_from_streak(m: List, streak: List) -> List:
     return m
 
 
-def update_swap_streak(m: List, streak: List) -> List:
+def update_swap_streak(m: List, streak: Tuple[Tuple[str, int, int], Tuple[str, int, int]]) -> List:
     ce1, cx1, cy1 = streak[0]
     ce2, cx2, cy2 = streak[1]
     m[cx1][cy1] = ce2
@@ -276,15 +241,47 @@ def possible_streaks(m: List) -> List:
     return sorted([c for c in candidates])
 
 
+class Swap(Event):
+    _stage: int
+    _max_stage: int
+    _ca: Tuple[int, int]
+    _cb: Tuple[int, int]
+    _completed: bool
+
+    def __init__(self, cells: List, event_type: EventType, stage: int = 0):
+        super().__init__(cells, event_type)
+        self._ca = cells[0]
+        self._cb = cells[1]
+        self._stage = stage
+        self._max_stage = ANIMATION_LENGTH
+        self._completed = True
+
+    def go(self):
+        super().go()
+        if self._stage < self._max_stage:
+            self._stage += 1
+            event_create(Swap(self._cells, self._event_type, self._stage))
+        else:
+            self._completed = False
+
+    def do_swap(self, m: List) -> List:
+        cx1, cy1 = self._ca
+        cx2, cy2 = self._cb
+        streak = tuple([tuple([m[cx1][cy1],cx1,cy1]),tuple([m[cx2][cy2],cx2,cy2])])
+        m = update_swap_streak(m, streak)
+        m = complete_all_streaks(m)
+        return m
+
+    def completed(self) -> bool:
+        return self._completed
+
+    def __str__(self):
+        return f"SWAP ({self._ca}) <=> ({self._cb}) {self._stage} ... {self._max_stage}"
+
+
 def char_colors(x: int, y: int) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
-    print("({},{}): ".format(x,y),end="")
     fg = COLOR_MATRIX_FG[x][y]
     bg = COLOR_MATRIX_BG[x][y]
-    print("FG = {} , BG = {}".format(fg,bg))
-    # fg = "WHITE"
-    # if "#" == cell_info:
-    #     fg = "WHITE"
-    #     bg = "RED"
     return color_string(fg, bg)
 
 
@@ -322,19 +319,11 @@ def matrix_tcod(console, m: List, streaks: List = None) -> None:
             console.print_box(x=cx, y=cy, string=ce, fg=fg, bg=bg, width=1, height=1)
 
 
-def enact_global_event() -> None:
-    if len(GLOBAL_EVENT_QUEUE) > 0:
-        print("GLOBAL_EVENT_QUEUE ENACTING: ", event_go())
-    else:
-        reset_color_matrices()
-
-
 def main() -> None:
     # tileset = tcod.tileset.load_tilesheet("curses_square_16x16_b.png", 16, 16, tcod.tileset.CHARMAP_CP437)
     tileset = tcod.tileset.load_tilesheet("dejavu12x12_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD)
     console = tcod.Console(WINDOW_WIDTH, WINDOW_HEIGHT)
     matrix = init_matrix()
-    # print_matrix(matrix)
 
     # os.environ["SDL_RENDER_DRIVER"] = "software"
     with tcod.context.new(columns=console.width, rows=console.height, tileset=tileset,
@@ -343,51 +332,36 @@ def main() -> None:
         matrix_tcod(console, matrix)
         context.present(console)
         while True:  # Main loop, runs until SystemExit is raised.
-            for event in tcod.event.wait(1):
-                event_go()
-                matrix_tcod(console, matrix)
-                # print(event)
-                # context.convert_event(event)  # Sets tile coordinates for mouse events.
 
-                if event.type == "KEYDOWN":
+            console.clear()
+            event = event_go()
+            if not event.completed():
+                if EventType.SWAP == event._event_type:
+                    matrix = event.do_swap(matrix)
+            matrix = complete_all_streaks(matrix)
+            matrix = matrix_fill(matrix)
+            matrix = matrix_update(matrix)
+            matrix_tcod(console, matrix, possible_streaks(matrix))
+            context.present(console)
+            time.sleep(0.05)
 
-                    if event.sym == tcod.event.K_q:
-                        raise SystemExit()
-
-                    console.clear()
-
-                    if event.sym == tcod.event.K_f:
-                        matrix = complete_all_streaks(matrix)
-                        # matrix, meta = matrix_update(matrix, meta)
-                        matrix_tcod(console, matrix, possible_streaks(matrix))
-                    else:
-                        # if event.sym == tcod.event.K_d:
-                        #     matrix, meta = matrix_update(matrix, meta)
-                        if event.sym == tcod.event.K_s:
-                            matrix = complete_all_streaks(matrix)
-                        if event.sym == tcod.event.K_a:
-                            matrix = matrix_fill(matrix)
-                        if event.sym == tcod.event.K_r:
-                            matrix = init_matrix()
-                            # meta = meta_matrix()
-                        if K_0 <= event.sym <= K_9:
-                            s_num = event.sym - K_0
-                            streaks = possible_streaks(matrix)
-                            if s_num < len(streaks):
-                                streak = streaks[s_num]
-                                matrix = update_swap_streak(matrix, streak)
-                                matrix = complete_all_streaks(matrix)
-                                _, cx1, cy1 = streak[0]
-                                _, cx2, cy2 = streak[1]
-                                event_create(Animation([(cx1,cy1),(cx2,cy2)],EventType.ANIMATE,["RED","BLUE"],0,5))
-                                # event_go()
-                        matrix = matrix_update(matrix)
-                        matrix_tcod(console, matrix)
-
-                    context.present(console)
+            for event in tcod.event.get():
                 if event.type == "QUIT":
                     raise SystemExit()
-        # The window will be closed after the above with-block exits.
+                if event.type == "KEYDOWN":
+                    if event.sym == tcod.event.K_q:
+                        raise SystemExit()
+                    elif K_0 <= event.sym <= K_9:
+                        s_num = event.sym - K_0
+                        streaks = possible_streaks(matrix)
+                        if s_num < len(streaks):
+                            streak = streaks[s_num]
+                            _, cx1, cy1 = streak[0]
+                            _, cx2, cy2 = streak[1]
+                            event_create(Swap([(cx1, cy1), (cx2, cy2)], EventType.SWAP))
+                            event_create(Animation([(cx1, cy1), (cx2, cy2)], EventType.ANIMATE, ["RED", "BLUE", "GREEN", "PURPLE"]))
+                    else:
+                        print(f"BAD KEY: {event}")
 
 
 if __name__ == "__main__":
