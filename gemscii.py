@@ -15,6 +15,19 @@ ANIMATION_LENGTH = 5
 COLOR_MATRIX_FG = []
 COLOR_MATRIX_BG = []
 
+COLOR_MAP = dict(
+    {"BLACK": (0, 0, 0),
+     "WHITE": (255, 255, 255),
+     "RED": (255, 0, 0),
+     "GREEN": (0, 255, 0),
+     "PURPLE": (255, 0, 255),
+     "ORANGE": (255, 127, 0),
+     "PINK": (255, 0, 127),
+     "YELLOW": (255, 255, 0),
+     "CYAN": (0, 255, 255),
+     "BLUE": (0, 0, 255),
+     })
+
 
 def reset_color_matrix(c: str) -> List:
     return [[c for _ in range(MATRIX_HEIGHT)] for _ in range(MATRIX_WIDTH)]
@@ -88,10 +101,6 @@ class Event:
         assert False, f"TRIED TO CALL SWAP ON NON-SWAP EVENT: {self._event_type}"
         pass
 
-    @property
-    def event_type(self):
-        return self._event_type
-
 
 DEFAULT_EVENT = Event([], CellState.NO_EVENT)
 
@@ -103,11 +112,9 @@ def event_create(event: Event):
 def event_go() -> Event:
     global DEFAULT_EVENT
     if len(GLOBAL_EVENT_QUEUE) > 0:
-        print("ENACTING")
         event = GLOBAL_EVENT_QUEUE.popleft()
         event.go()
         return event
-    # print("RESETTING...")
     reset_color_matrices()
     return DEFAULT_EVENT
 
@@ -122,7 +129,7 @@ class Animation(Event):
     def go(self):
         super().go()
         for cell in self._cells:
-            set_fgcolor(cell[0],cell[1],self._colors[0])
+            set_fgcolor(cell[0], cell[1], self._colors[0])
         if self._stage < self._max_stage:
             self._colors = self._colors[1:] + self._colors[:1]
             event_create(Animation(self._cells, self._event_type, self._colors, self._stage + 1))
@@ -131,19 +138,6 @@ class Animation(Event):
         return "ANIMATION ({} , {}) {} => {}: {}".format(self._cells[0][0], self._cells[0][1], self._stage,
                                                          self._max_stage, self._colors)
 
-
-COLOR_MAP = dict(
-    {"BLACK": (0, 0, 0),
-     "WHITE": (255, 255, 255),
-     "RED": (255, 0, 0),
-     "GREEN": (0, 255, 0),
-     "PURPLE": (255, 0, 255),
-     "ORANGE": (255, 127, 0),
-     "PINK": (255, 0, 127),
-     "YELLOW": (255, 255, 0),
-     "CYAN": (0, 255, 255),
-     "BLUE": (0, 0, 255),
-     })
 
 COLORS = list(COLOR_MAP.keys())[2:]
 
@@ -207,22 +201,17 @@ def matrix_fill(m: List) -> List:
         for i in range(MATRIX_WIDTH):
             for j in range(MATRIX_HEIGHT):
                 if elt(m, i, j) == "#":
-                    # if m[i][j] == "#":
                     if j < (MATRIX_HEIGHT - 1):
                         m = set_elt(m, elt(m, i, j + 1), i, j)
                         m = set_elt(m, new_gem(), i, j + 1)
-                        # m[i][j] = m[i][j + 1]
-                        # m[i][j + 1] = new_gem()
                     else:
                         m = set_elt(m, new_gem(), i, j)
-                        # m[i][j] = new_gem()
     return m
 
 
 def update_from_streak(m: List, streak: List) -> List:
     for cell in streak:
         _, cx, cy = cell
-        # m[cx][cy] = "#"
         set_elt(m, "#", cx, cy)
     return m
 
@@ -232,17 +221,6 @@ def update_swap_streak(m: List, streak: Tuple[Tuple[str, int, int], Tuple[str, i
     ce2, cx2, cy2 = streak[1]
     m = set_elt(m, ce2, cx1, cy1)
     m = set_elt(m, ce1, cx2, cy2)
-    # m[cx1][cy1] = ce2
-    # m[cx2][cy2] = ce1
-    return m
-
-
-def matrix_update(m: List) -> List:
-    streaks = matrix_streaks(m)
-    if len(streaks) > 0:
-        for i, streak in enumerate(streaks):
-            for cell in streak:
-                _, cx, cy = cell
     return m
 
 
@@ -266,13 +244,10 @@ def possible_streaks(m: List) -> List:
             neighbor_switch_matrix = deepcopy(m)
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
                 assert False, "streaks exist?"
-            # neighbor_switch_matrix[n[1]][n[2]] = elt(m,c[1],c[2]) #m[c[1]][c[2]]
-            # neighbor_switch_matrix[c[1]][c[2]] = elt(m,n[1],n[2]) #m[n[1]][n[2]]
             neighbor_switch_matrix = set_elt(neighbor_switch_matrix, elt(m, c[1], c[2]), n[1], n[2])
             neighbor_switch_matrix = set_elt(neighbor_switch_matrix, elt(m, n[1], n[2]), c[1], c[2])
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
                 candidates.add(tuple(sorted([c, (elt(m, n[1], n[2]), n[1], n[2])])))
-    # print(candidates)
     return sorted([c for c in candidates])
 
 
@@ -328,15 +303,14 @@ def mxy(i: int, j: int) -> Tuple[int, int]:
     return x, y
 
 
-def matrix_tcod(console, m: List, streaks: List = None) -> None:
+def matrix_tcod(console, m: List) -> None:
     def color_string(foreground: str, background: str):
         return COLOR_MAP[foreground], COLOR_MAP[background]
 
     def char_colors(x: int, y: int) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
         return color_string(COLOR_MATRIX_FG[x][y], COLOR_MATRIX_BG[x][y])
 
-    if streaks is None:
-        streaks = matrix_streaks(m)
+    streaks = possible_streaks(m)
     for i, streak in enumerate(streaks):
         xmin: int = min([cell[1] for cell in streak])
         xmax: int = max([cell[1] for cell in streak])
@@ -348,7 +322,6 @@ def matrix_tcod(console, m: List, streaks: List = None) -> None:
     for j in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
             cx, cy = mxy(i, j)
-            # ce = m[i][j]
             ce = elt(m, i, j)
             fg, bg = char_colors(i, j)
             console.print_box(x=cx, y=cy, string=ce, fg=fg, bg=bg, width=1, height=1)
@@ -360,7 +333,6 @@ def main() -> None:
     console = tcod.Console(WINDOW_WIDTH, WINDOW_HEIGHT)
     matrix = init_matrix()
 
-    # os.environ["SDL_RENDER_DRIVER"] = "software"
     with tcod.context.new(columns=console.width, rows=console.height, tileset=tileset,
                           renderer=tcod.context.RENDERER_SDL2) as context:
         console.clear()
@@ -371,12 +343,11 @@ def main() -> None:
             console.clear()
             event = event_go()
             if not event.completed():
-                if CellState.SWAP == event.event_type:
+                if CellState.SWAP == event._event_type:
                     matrix = event.do_swap(matrix)
             matrix = complete_all_streaks(matrix)
             matrix = matrix_fill(matrix)
-            matrix = matrix_update(matrix)
-            matrix_tcod(console, matrix, possible_streaks(matrix))
+            matrix_tcod(console, matrix)
             context.present(console)
             time.sleep(0.05)
 
