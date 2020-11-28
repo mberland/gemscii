@@ -1,10 +1,3 @@
-# * % . % . # . . . . # *
-# * * % % . . % . # * # *
-# # # * . * * . . X % X X
-# . X . # * * % # . X # #
-# . . X X . # # % X X # .
-# % . % % X * % X # * % #
-# * X . % # * * # X . X X
 import random
 import tcod
 import time
@@ -33,10 +26,28 @@ def reset_color_matrices() -> None:
     COLOR_MATRIX_BG = reset_color_matrix("BLACK")
 
 
+def set_fgcolor(x: int, y: int, color: str) -> None:
+    global COLOR_MATRIX_FG
+    COLOR_MATRIX_FG[x][y] = color
+
+
+def set_bgcolor(x: int, y: int, color: str) -> None:
+    global COLOR_MATRIX_BG
+    COLOR_MATRIX_BG[x][y] = color
+
+
+def fgcolor(x: int, y: int) -> str:
+    return COLOR_MATRIX_FG[x][y]
+
+
+def bgcolor(x: int, y: int) -> str:
+    return COLOR_MATRIX_BG[x][y]
+
+
 reset_color_matrices()
 
 
-class EventType(Enum):
+class CellState(Enum):
     UNKNOWN = -99,
     NO_EVENT = 0,
     KILLED = 10,
@@ -46,11 +57,21 @@ class EventType(Enum):
     SWAP = 14
 
 
-class Event:
-    _cells: List
-    _event_type: EventType
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
 
-    def __init__(self, cells: List, event_type: EventType):
+
+class Cell:
+    def __init__(self, x: int, y: int, gem: str, color: str = "WHITE"):
+        self.p = Point(x, y)
+        self.gem = gem
+        self.color = color
+
+
+class Event:
+    def __init__(self, cells: List, event_type: CellState):
         self._cells = cells
         self._event_type = event_type
 
@@ -72,7 +93,7 @@ class Event:
         return self._event_type
 
 
-DEFAULT_EVENT = Event([], EventType.NO_EVENT)
+DEFAULT_EVENT = Event([], CellState.NO_EVENT)
 
 
 def event_create(event: Event):
@@ -92,11 +113,7 @@ def event_go() -> Event:
 
 
 class Animation(Event):
-    _colors: List
-    _stage: int
-    _max_stage: int
-
-    def __init__(self, cells: List, event_type: EventType, colors: List, stage: int = 0):
+    def __init__(self, cells: List, event_type: CellState, colors: List, stage: int = 0):
         super().__init__(cells, event_type)
         self._colors = colors
         self._stage = stage
@@ -105,7 +122,7 @@ class Animation(Event):
     def go(self):
         super().go()
         for cell in self._cells:
-            COLOR_MATRIX_FG[cell[0]][cell[1]] = self._colors[0]
+            set_fgcolor(cell[0],cell[1],self._colors[0])
         if self._stage < self._max_stage:
             self._colors = self._colors[1:] + self._colors[:1]
             event_create(Animation(self._cells, self._event_type, self._colors, self._stage + 1))
@@ -133,10 +150,6 @@ COLORS = list(COLOR_MAP.keys())[2:]
 GLOBAL_EVENT_QUEUE = deque()
 
 
-def color_string(foreground: str, background: str):
-    return COLOR_MAP[foreground], COLOR_MAP[background]
-
-
 def valid_x(x) -> bool:
     return 0 <= x < MATRIX_WIDTH
 
@@ -157,6 +170,12 @@ def elt(m, x, y):
     if valid_x(x) and valid_y(y):
         return m[x][y]
     return None
+
+
+def set_elt(m: List, c: str, x: int, y: int) -> List:
+    if valid_x(x) and valid_y(y):
+        m[x][y] = c
+    return m
 
 
 def matrix_streaks(m: List) -> List:
@@ -187,27 +206,34 @@ def matrix_fill(m: List) -> List:
     for _ in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
             for j in range(MATRIX_HEIGHT):
-                if m[i][j] == "#":
+                if elt(m, i, j) == "#":
+                    # if m[i][j] == "#":
                     if j < (MATRIX_HEIGHT - 1):
-                        m[i][j] = m[i][j + 1]
-                        m[i][j + 1] = new_gem()
+                        m = set_elt(m, elt(m, i, j + 1), i, j)
+                        m = set_elt(m, new_gem(), i, j + 1)
+                        # m[i][j] = m[i][j + 1]
+                        # m[i][j + 1] = new_gem()
                     else:
-                        m[i][j] = new_gem()
+                        m = set_elt(m, new_gem(), i, j)
+                        # m[i][j] = new_gem()
     return m
 
 
 def update_from_streak(m: List, streak: List) -> List:
     for cell in streak:
         _, cx, cy = cell
-        m[cx][cy] = "#"
+        # m[cx][cy] = "#"
+        set_elt(m, "#", cx, cy)
     return m
 
 
 def update_swap_streak(m: List, streak: Tuple[Tuple[str, int, int], Tuple[str, int, int]]) -> List:
     ce1, cx1, cy1 = streak[0]
     ce2, cx2, cy2 = streak[1]
-    m[cx1][cy1] = ce2
-    m[cx2][cy2] = ce1
+    m = set_elt(m, ce2, cx1, cy1)
+    m = set_elt(m, ce1, cx2, cy2)
+    # m[cx1][cy1] = ce2
+    # m[cx2][cy2] = ce1
     return m
 
 
@@ -233,17 +259,19 @@ def possible_streaks(m: List) -> List:
     candidates = set()
     m = complete_all_streaks(m)
     deltas = [(i, j) for i in range(-1, 2) for j in range(-1, 2) if abs(i) != abs(j)]
-    cells = [(m[i][j], i, j) for j in range(1, MATRIX_HEIGHT - 1) for i in range(1, MATRIX_WIDTH - 1)]
+    cells = [(elt(m, i, j), i, j) for j in range(1, MATRIX_HEIGHT - 1) for i in range(1, MATRIX_WIDTH - 1)]
     for c in cells:
         neighbors = [("?", (d[0] + c[1]), (d[1] + c[2])) for d in deltas]
         for n in neighbors:
             neighbor_switch_matrix = deepcopy(m)
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
                 assert False, "streaks exist?"
-            neighbor_switch_matrix[n[1]][n[2]] = m[c[1]][c[2]]
-            neighbor_switch_matrix[c[1]][c[2]] = m[n[1]][n[2]]
+            # neighbor_switch_matrix[n[1]][n[2]] = elt(m,c[1],c[2]) #m[c[1]][c[2]]
+            # neighbor_switch_matrix[c[1]][c[2]] = elt(m,n[1],n[2]) #m[n[1]][n[2]]
+            neighbor_switch_matrix = set_elt(neighbor_switch_matrix, elt(m, c[1], c[2]), n[1], n[2])
+            neighbor_switch_matrix = set_elt(neighbor_switch_matrix, elt(m, n[1], n[2]), c[1], c[2])
             if len(matrix_streaks(neighbor_switch_matrix)) > 0:
-                candidates.add(tuple(sorted([c, (m[n[1]][n[2]], n[1], n[2])])))
+                candidates.add(tuple(sorted([c, (elt(m, n[1], n[2]), n[1], n[2])])))
     # print(candidates)
     return sorted([c for c in candidates])
 
@@ -255,7 +283,7 @@ class Swap(Event):
     _cb: Tuple[int, int]
     _completed: bool
 
-    def __init__(self, cells: List, event_type: EventType, stage: int = 0):
+    def __init__(self, cells: List, event_type: CellState, stage: int = 0):
         super().__init__(cells, event_type)
         self._ca = cells[0]
         self._cb = cells[1]
@@ -286,12 +314,6 @@ class Swap(Event):
         return f"SWAP ({self._ca}) <=> ({self._cb}) {self._stage} ... {self._max_stage}"
 
 
-def char_colors(x: int, y: int) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
-    fg = COLOR_MATRIX_FG[x][y]
-    bg = COLOR_MATRIX_BG[x][y]
-    return color_string(fg, bg)
-
-
 WINDOW_WIDTH = MATRIX_WIDTH * 8
 WINDOW_HEIGHT = MATRIX_HEIGHT * 8
 X_BUFFER: int = int(WINDOW_WIDTH / (2 + MATRIX_WIDTH))
@@ -307,6 +329,12 @@ def mxy(i: int, j: int) -> Tuple[int, int]:
 
 
 def matrix_tcod(console, m: List, streaks: List = None) -> None:
+    def color_string(foreground: str, background: str):
+        return COLOR_MAP[foreground], COLOR_MAP[background]
+
+    def char_colors(x: int, y: int) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
+        return color_string(COLOR_MATRIX_FG[x][y], COLOR_MATRIX_BG[x][y])
+
     if streaks is None:
         streaks = matrix_streaks(m)
     for i, streak in enumerate(streaks):
@@ -316,12 +344,12 @@ def matrix_tcod(console, m: List, streaks: List = None) -> None:
         ymax: int = max([cell[2] for cell in streak])
         x1, y1 = mxy(xmin, ymin)
         x2, y2 = mxy(xmax, ymax)
-        # print(xmin,ymin,xmax,ymax)
         console.draw_frame(x1 - 1, y1 - 1, x2 - x1 + 3, y2 - y1 + 3, str(i), clear=False)
     for j in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
             cx, cy = mxy(i, j)
-            ce = m[i][j]
+            # ce = m[i][j]
+            ce = elt(m, i, j)
             fg, bg = char_colors(i, j)
             console.print_box(x=cx, y=cy, string=ce, fg=fg, bg=bg, width=1, height=1)
 
@@ -338,12 +366,12 @@ def main() -> None:
         console.clear()
         matrix_tcod(console, matrix)
         context.present(console)
-        while True:  # Main loop, runs until SystemExit is raised.
+        while True:
 
             console.clear()
             event = event_go()
             if not event.completed():
-                if EventType.SWAP == event.event_type:
+                if CellState.SWAP == event.event_type:
                     matrix = event.do_swap(matrix)
             matrix = complete_all_streaks(matrix)
             matrix = matrix_fill(matrix)
@@ -365,8 +393,8 @@ def main() -> None:
                             streak = streaks[s_num]
                             _, cx1, cy1 = streak[0]
                             _, cx2, cy2 = streak[1]
-                            event_create(Swap([(cx1, cy1), (cx2, cy2)], EventType.SWAP))
-                            event_create(Animation([(cx1, cy1), (cx2, cy2)], EventType.ANIMATE,
+                            event_create(Swap([(cx1, cy1), (cx2, cy2)], CellState.SWAP))
+                            event_create(Animation([(cx1, cy1), (cx2, cy2)], CellState.ANIMATE,
                                                    ["RED", "BLUE", "GREEN", "PURPLE"]))
                     else:
                         print(f"BAD KEY: {event}")
