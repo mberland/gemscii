@@ -4,7 +4,7 @@ import time
 from collections import deque
 from copy import deepcopy
 from enum import Enum
-from typing import Tuple, List
+from typing import Tuple, List, FrozenSet
 
 from tcod.event import K_9, K_0
 
@@ -29,8 +29,127 @@ COLOR_MAP = dict(
      })
 
 
+class CellState(Enum):
+    UNKNOWN = -99,
+    NO_EVENT = 0,
+    ALIVE = 1,
+    KILLED = 10,
+    BORN = 11,
+    EXPLODE = 12,
+    ANIMATE = 13,
+    SWAP = 14
+
+
+COLORS = list(COLOR_MAP.keys())[2:]
+
+GLOBAL_EVENT_QUEUE = deque()
+
+
+def valid_x(x) -> bool:
+    return 0 <= x < MATRIX_WIDTH
+
+
+def valid_y(y) -> bool:
+    return 0 <= y < MATRIX_HEIGHT
+
+
+def new_gem() -> str:
+    return random.choice(gems)
+
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+
+class Cell:
+    def __init__(self, x: int, y: int, gem: str, fg: str = "WHITE", bg: str = "BLACK", state: CellState = CellState.BORN):
+        self.p = Point(x, y)
+        self._gem = gem
+        self._fgcolor = fg
+        self._bgcolor = bg
+        self._state = state
+
+    @property
+    def gem(self):
+        return self._gem
+
+    @property
+    def fgcolor(self):
+        return self._fgcolor
+
+    @property
+    def bgcolor(self):
+        return self._bgcolor
+
+    @property
+    def state(self) -> CellState:
+        return self._state
+
+    @state.setter
+    def set_state(self, state: CellState):
+        self._state = state
+
+    @gem.setter
+    def set_gem(self,gem: str) -> None:
+        self._gem = gem
+
+    @fgcolor.setter
+    def set_fgcolor(self, fg: str) -> None:
+        self._fgcolor = fg
+
+    @bgcolor.setter
+    def set_bgcolor(self, bg: str) -> None:
+        self._bgcolor = bg
+
+    def __str__(self):
+        return f"CELL ({self.p.x}, {self.p.y}) = {self.state} [{self.fgcolor}, {self.bgcolor}]"
+
+
+CELL_MATRIX = [[Cell(i,j,new_gem()) for j in range(MATRIX_HEIGHT)] for i in range(MATRIX_WIDTH)]
+
+
+def c_cell(x: int, y: int) -> Cell:
+    return CELL_MATRIX[x][y]
+
+
+def c_set_cell(x: int, y: int, cell: Cell) -> None:
+    global CELL_MATRIX
+    CELL_MATRIX[x][y] = cell
+
+
+def c_set_gem(x: int, y: int, gem: str) -> None:
+    c_cell(x,y).set_gem = gem
+
+
+def c_set_colors(x: int, y: int, fg: str = "WHITE", bg: str = "BLACK"):
+    c_cell(x,y).set_bgcolor = bg
+    c_cell(x,y).set_fgcolor = fg
+
+
+def c_gem(x: int, y: int) -> str:
+    return c_cell(x,y).gem
+
+
+# c_set_colors(0,0,"PURPLE","GREEN")
+# assert "PURPLE" == c_cell(0,0).fgcolor and "GREEN" == c_cell(0,0).bgcolor, "c_set_colors not working as intended"
+#
+
+def c_reset_color_matrix(fg: str, bg: str) -> None:
+    for j in range(MATRIX_HEIGHT):
+        for i in range(MATRIX_WIDTH):
+            c_set_colors(i,j,fg,bg)
+
+
 def reset_color_matrix(c: str) -> List:
-    return [[c for _ in range(MATRIX_HEIGHT)] for _ in range(MATRIX_WIDTH)]
+    return [[c for j in range(MATRIX_HEIGHT)] for i in range(MATRIX_WIDTH)]
 
 
 def reset_color_matrices() -> None:
@@ -58,35 +177,21 @@ def bgcolor(x: int, y: int) -> str:
 
 
 reset_color_matrices()
-
-
-class CellState(Enum):
-    UNKNOWN = -99,
-    NO_EVENT = 0,
-    KILLED = 10,
-    BORN = 11,
-    EXPLODE = 12,
-    ANIMATE = 13,
-    SWAP = 14
-
-
-class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-
-class Cell:
-    def __init__(self, x: int, y: int, gem: str, color: str = "WHITE"):
-        self.p = Point(x, y)
-        self.gem = gem
-        self.color = color
+c_reset_color_matrix("WHITE","BLACK")
 
 
 class Event:
     def __init__(self, cells: List, event_type: CellState):
         self._cells = cells
         self._event_type = event_type
+
+    @property
+    def event_type(self):
+        return self._event_type
+
+    @property
+    def cells(self):
+        return self._cells
 
     def go(self) -> None:
         print(self)
@@ -132,28 +237,47 @@ class Animation(Event):
             set_fgcolor(cell[0], cell[1], self._colors[0])
         if self._stage < self._max_stage:
             self._colors = self._colors[1:] + self._colors[:1]
-            event_create(Animation(self._cells, self._event_type, self._colors, self._stage + 1))
+            event_create(Animation(self.cells, self.event_type, self._colors, self._stage + 1))
 
     def __str__(self):
         return "ANIMATION ({} , {}) {} => {}: {}".format(self._cells[0][0], self._cells[0][1], self._stage,
                                                          self._max_stage, self._colors)
 
 
-COLORS = list(COLOR_MAP.keys())[2:]
+class CAnimation(Event):
+    def __init__(self, cells: List[Point], event_type: CellState, colors: List, stage: int = 0):
+        super().__init__(cells, event_type)
+        self._colors = colors
+        self._stage = stage
+        self._max_stage = ANIMATION_LENGTH
 
-GLOBAL_EVENT_QUEUE = deque()
+    @property
+    def color(self) -> str:
+        output = self._colors[0]
+        self._colors = self._colors[1:] + self._colors[:1]
+        return output
 
+    @property
+    def colors(self):
+        return self._colors
 
-def valid_x(x) -> bool:
-    return 0 <= x < MATRIX_WIDTH
+    @property
+    def stage(self):
+        return self._stage
 
+    @property
+    def max_stage(self):
+        return self._max_stage
 
-def valid_y(y) -> bool:
-    return 0 <= y < MATRIX_HEIGHT
+    def go(self):
+        super().go()
+        for cell in self._cells:
+            c_set_colors(cell.x, cell.y, self.color)
+        if self._stage < self._max_stage:
+            event_create(CAnimation(self.cells, self.event_type, self.colors, self.stage + 1))
 
-
-def new_gem():
-    return random.choice(gems)
+    def __str__(self):
+        return f"ANIMATION ({self.cells}) {self.stage} => {self.max_stage}: {self.colors}"
 
 
 def init_matrix() -> List:
@@ -196,6 +320,27 @@ def matrix_streaks(m: List) -> List:
     return sorted([x for x in streaks if not any(x.issubset(s) for s in streaks if s != x)])
 
 
+def c_matrix_streaks() -> List[FrozenSet[Point]]:
+    streaks = set()
+    deltas = [(i, j) for i in range(-1, 2) for j in range(-1, 2) if i != 0 or j != 0]
+    points = [Point(i, j) for j in range(MATRIX_HEIGHT) for i in range(MATRIX_WIDTH)]
+    for p in points:
+        for delta in deltas:
+            matches = 0
+            dx, dy = delta
+            ax, ay = delta
+            gem = c_gem(p.x, p.y)
+            streak = {Point(p.x,p.y)}
+            while valid_x(p.x + ax) and valid_y(p.y + ay) and gem == c_gem(p.x + ax, p.y + ay):
+                streak.add(Point(p.x + ax, p.y + ay))
+                ax += dx
+                ay += dy
+                matches += 1
+            if matches >= 2:
+                streaks.add(frozenset(streak))
+    return sorted([x for x in streaks if not any(x.issubset(s) for s in streaks if s != x)])
+
+
 def matrix_fill(m: List) -> List:
     for _ in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
@@ -209,11 +354,28 @@ def matrix_fill(m: List) -> List:
     return m
 
 
+def c_matrix_fill() -> None:
+    for _ in range(MATRIX_HEIGHT):
+        for i in range(MATRIX_WIDTH):
+            for j in range(MATRIX_HEIGHT):
+                if c_cell(i,j).state == CellState.KILLED:
+                    if j < (MATRIX_HEIGHT - 1):
+                        c_set_gem(i,j,c_gem(i,j+1))
+                        c_set_gem(i,j,new_gem())
+                    else:
+                        c_set_gem(i,j,new_gem())
+
+
 def update_from_streak(m: List, streak: List) -> List:
     for cell in streak:
         _, cx, cy = cell
         set_elt(m, "#", cx, cy)
     return m
+
+
+def c_update_from_streak(streak: FrozenSet[Point]) -> None:
+    for p in streak:
+        c_cell(p.x,p.y).set_state = CellState.KILLED
 
 
 def update_swap_streak(m: List, streak: Tuple[Tuple[str, int, int], Tuple[str, int, int]]) -> List:
@@ -224,6 +386,13 @@ def update_swap_streak(m: List, streak: Tuple[Tuple[str, int, int], Tuple[str, i
     return m
 
 
+def c_update_swap_streak(streak: Tuple[Point, Point]) -> None:
+    p1, p2 = streak
+    swap_gem = c_gem(p1.x, p1.y)
+    c_set_gem(p1.x,p1.y,c_gem(p2.x,p2.y))
+    c_set_gem(p2.x,p2.y,swap_gem)
+
+
 def complete_all_streaks(m: List) -> List:
     streaks = matrix_streaks(m)
     while len(streaks) > 0:
@@ -231,6 +400,14 @@ def complete_all_streaks(m: List) -> List:
         m = matrix_fill(m)
         streaks = matrix_streaks(m)
     return m
+
+
+def c_complete_all_streaks() -> None:
+    streaks = c_matrix_streaks()
+    while len(streaks) > 0:
+        c_update_from_streak(streaks[0])
+        c_matrix_fill()
+        streaks = c_matrix_streaks()
 
 
 def possible_streaks(m: List) -> List:
@@ -250,6 +427,24 @@ def possible_streaks(m: List) -> List:
                 candidates.add(tuple(sorted([c, (elt(m, n[1], n[2]), n[1], n[2])])))
     return sorted([c for c in candidates])
 
+
+def c_possible_streaks() -> List[FrozenSet[Point]]:
+    assert False, "c_possible_streaks() UNIMPLEMENTED"
+
+
+class CSwap(Event):
+    def __init__(self):
+        assert False, "CSwap UNIMPLEMENTED"
+
+
+class CMatch(Event):
+    def __init__(self):
+        assert False, "CMatch UNIMPLEMENTED"
+
+
+class CDeath(Event):
+    def __init__(self):
+        assert False, "CDeath UNIMPLEMENTED"
 
 class Swap(Event):
     _stage: int
