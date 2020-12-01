@@ -62,14 +62,25 @@ class Point:
         self.x = x
         self.y = y
 
-    def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
+    def __key(self):
+        return self.x, self.y
 
     def __ne__(self, other):
         return not self.__eq__(other)
 
     def __add__(self, other):
         return Point(self.x + other.x, self.y + other.y)
+
+    def __hash__(self):
+        return hash(self.__key())
+
+    def __eq__(self, other):
+        if isinstance(other, Point):
+            return self.__key() == other.__key()
+        return NotImplemented
+
+    def __str__(self):
+        return f"P({self.x},{self.y})"
 
 
 class Cell:
@@ -118,7 +129,8 @@ class Cell:
 
 
 CellMatrix = List[List[Cell]]
-SwapStreak = FrozenSet[Point, ...]
+ColorRGB = Tuple[int, int, int]
+SwapStreak = FrozenSet[Point]
 
 GLOBAL_CELL_MATRIX = [[Cell(i, j, new_gem()) for j in range(MATRIX_HEIGHT)] for i in range(MATRIX_WIDTH)]
 
@@ -127,8 +139,13 @@ def cm_cell(m: CellMatrix, x: int, y: int) -> Cell:
     return m[x][y]
 
 
-def c_cell(x: int, y: int) -> Cell:
-    return cm_cell(GLOBAL_CELL_MATRIX, x, y)
+# def c_cell(x: int, y: int) -> Cell:
+#     return cm_cell(GLOBAL_CELL_MATRIX, x, y)
+
+
+def c_set_state(x: int, y: int, state: CellState) -> None:
+    global GLOBAL_CELL_MATRIX
+    GLOBAL_CELL_MATRIX[x][y].state = state
 
 
 def cm_set_cell(m: CellMatrix, x: int, y: int, cell: Cell) -> CellMatrix:
@@ -142,7 +159,8 @@ def c_set_cell(x: int, y: int, cell: Cell) -> None:
 
 
 def c_set_gem(x: int, y: int, gem: str) -> None:
-    c_cell(x, y).set_gem = gem
+    global GLOBAL_CELL_MATRIX
+    GLOBAL_CELL_MATRIX[x][y].gem = gem
 
 
 def cm_set_gem(m: CellMatrix, x: int, y: int, gem: str) -> CellMatrix:
@@ -151,8 +169,8 @@ def cm_set_gem(m: CellMatrix, x: int, y: int, gem: str) -> CellMatrix:
 
 
 def c_set_colors(x: int, y: int, fg: str = "WHITE", bg: str = "BLACK") -> None:
-    c_cell(x, y).set_bgcolor = bg
-    c_cell(x, y).set_fgcolor = fg
+    GLOBAL_CELL_MATRIX[x][y].bgcolor = bg
+    GLOBAL_CELL_MATRIX[x][y].fgcolor = fg
 
 
 def cm_set_colors(m: CellMatrix, x: int, y: int, fg: str = "WHITE", bg: str = "BLACK") -> CellMatrix:
@@ -161,12 +179,26 @@ def cm_set_colors(m: CellMatrix, x: int, y: int, fg: str = "WHITE", bg: str = "B
     return m
 
 
+def c_colors(x: int, y: int) -> Tuple[str, str]:
+    global GLOBAL_CELL_MATRIX
+    return cm_cell(GLOBAL_CELL_MATRIX, x, y).fgcolor, cm_cell(GLOBAL_CELL_MATRIX, x, y).bgcolor
+
+
 def cm_gem(m: CellMatrix, x: int, y: int) -> str:
     return cm_cell(m, x, y).gem
 
 
 def c_gem(x: int, y: int) -> str:
     return cm_cell(GLOBAL_CELL_MATRIX, x, y).gem
+
+
+def cm_state(m: CellMatrix, x: int, y: int) -> CellState:
+    return cm_cell(m, x, y).state
+
+
+def c_state(x: int, y: int) -> CellState:
+    global GLOBAL_CELL_MATRIX
+    return cm_state(GLOBAL_CELL_MATRIX, x, y)
 
 
 # c_set_colors(0,0,"PURPLE","GREEN")
@@ -425,7 +457,8 @@ def c_matrix_fill() -> None:
     for _ in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
             for j in range(MATRIX_HEIGHT):
-                if c_cell(i, j).state == CellState.KILLED:
+                if c_state(i, j) == CellState.KILLED:
+                    print(f"KILLED: ({i},{j})")
                     if j < (MATRIX_HEIGHT - 1):
                         c_set_gem(i, j, c_gem(i, j + 1))
                         c_set_gem(i, j, new_gem())
@@ -442,7 +475,7 @@ def update_from_streak(m: List, streak: List) -> List:
 
 def c_update_from_streak(streak: FrozenSet[Point]) -> None:
     for p in streak:
-        c_cell(p.x, p.y).set_state = CellState.KILLED
+        c_set_state(p.x, p.y, CellState.KILLED)
 
 
 def swap_gems(m: List, streak: Tuple[Tuple[str, int, int], Tuple[str, int, int]]) -> List:
@@ -528,12 +561,12 @@ class CSwap(Event):
         super().go()
         if self._stage < self._max_stage:
             self._stage += 1
-            event_create(CAnimation(self._cells,["GREEN","PURPLE"]))
+            event_create(CAnimation(self._cells, ["GREEN", "PURPLE"]))
             event_create(CSwap(self._cells, self._stage))
         else:
             assert 2 == len(self._cells), f"ERROR: CSwap was asked to swap this: {self._cells}"
             c_complete_all_streaks()
-            c_swap_gems(tuple([self._cells[0],self._cells[1]]))
+            c_swap_gems(tuple([self._cells[0], self._cells[1]]))
 
 
 class CMatch(Event):
@@ -543,11 +576,11 @@ class CMatch(Event):
     def go(self):
         super().go()
         if self.stage < self.max_stage:
-            event_create(CAnimation(self._cells,["ORANGE","PINK"]))
+            event_create(CAnimation(self._cells, ["ORANGE", "PINK"]))
             event_create(CMatch(self._cells, self._stage))
         else:
             c_complete_all_streaks()
-            c_swap_gems(tuple([self._cells[0],self._cells[1]]))
+            c_swap_gems(tuple([self._cells[0], self._cells[1]]))
 
 
 class CDeath(Event):
@@ -599,9 +632,9 @@ X_START: int = 2 * X_BUFFER
 Y_START: int = Y_BUFFER
 
 
-def mxy(i: int, j: int) -> Tuple[int, int]:
-    x = X_START + i * X_BUFFER
-    y = Y_START + j * Y_BUFFER
+def ij_to_window_xy(cx: int, cy: int) -> Tuple[int, int]:
+    x = X_START + cx * X_BUFFER
+    y = Y_START + cy * Y_BUFFER
     return x, y
 
 
@@ -618,40 +651,70 @@ def matrix_tcod(console, m: List) -> None:
         xmax: int = max([cell[1] for cell in streak])
         ymin: int = min([cell[2] for cell in streak])
         ymax: int = max([cell[2] for cell in streak])
-        x1, y1 = mxy(xmin, ymin)
-        x2, y2 = mxy(xmax, ymax)
+        x1, y1 = ij_to_window_xy(xmin, ymin)
+        x2, y2 = ij_to_window_xy(xmax, ymax)
         console.draw_frame(x1 - 1, y1 - 1, x2 - x1 + 3, y2 - y1 + 3, str(i), clear=False)
     for j in range(MATRIX_HEIGHT):
         for i in range(MATRIX_WIDTH):
-            cx, cy = mxy(i, j)
+            cx, cy = ij_to_window_xy(i, j)
             ce = elt(m, i, j)
             fg, bg = char_colors(i, j)
             console.print_box(x=cx, y=cy, string=ce, fg=fg, bg=bg, width=1, height=1)
+
+
+def c_matrix_tcod(console) -> None:
+    global GLOBAL_CELL_MATRIX
+    w_buffer: int = 1
+
+    def cx_to_wx(cx: int) -> int:
+        return X_START + cx * X_BUFFER
+
+    def cy_to_wy(cy: int) -> int:
+        return Y_START + cy * Y_BUFFER
+
+    def c_color_string(foreground: str, background: str) -> Tuple[ColorRGB, ColorRGB]:
+        return COLOR_MAP[foreground], COLOR_MAP[background]
+
+    def c_char_colors(x: int, y: int) -> Tuple[ColorRGB, ColorRGB]:
+        _fg, _bg = c_colors(x, y)
+        return c_color_string(_fg, _bg)
+
+    streaks = c_possible_streaks()
+    for i, streak in enumerate(streaks):
+        xmin: int = min([cell.x for cell in streak])
+        xmax: int = max([cell.x for cell in streak])
+        ymin: int = min([cell.y for cell in streak])
+        ymax: int = max([cell.y for cell in streak])
+        pmin = Point(cx_to_wx(xmin), cy_to_wy(ymin))
+        pdim = Point(cx_to_wx(xmax - xmin), cy_to_wy(ymax - ymin))
+        console.draw_frame(pmin.x - w_buffer, pmin.y - w_buffer, pdim.x + 3 * w_buffer, pdim.y + 3 * w_buffer, str(i),
+                           clear=False)
+    for j in range(MATRIX_HEIGHT):
+        for i in range(MATRIX_WIDTH):
+            fg, bg = c_char_colors(i, j)
+            console.print_box(x=cx_to_wx(i), y=cy_to_wy(j), string=c_gem(i, j), fg=fg, bg=bg, width=1, height=1)
 
 
 def main() -> None:
     # tileset = tcod.tileset.load_tilesheet("curses_square_16x16_b.png", 16, 16, tcod.tileset.CHARMAP_CP437)
     tileset = tcod.tileset.load_tilesheet("dejavu12x12_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD)
     console = tcod.Console(WINDOW_WIDTH, WINDOW_HEIGHT)
-    matrix = init_matrix()
 
     with tcod.context.new(columns=console.width, rows=console.height, tileset=tileset,
                           renderer=tcod.context.RENDERER_SDL2) as context:
         console.clear()
-        matrix_tcod(console, matrix)
+        c_matrix_tcod(console)
         context.present(console)
         while True:
 
             console.clear()
             event = event_go()
-            if not event.completed():
-                if CellState.SWAP == event.event_type:
-                    matrix = event.do_swap(matrix)
-            matrix = complete_all_streaks(matrix)
-            matrix = matrix_fill(matrix)
-            matrix_tcod(console, matrix)
+            print("EVENT: ", event)
+            c_complete_all_streaks()
+            c_matrix_fill()
+            c_matrix_tcod(console)
             context.present(console)
-            time.sleep(0.05)
+            time.sleep(0.5)
 
             for event in tcod.event.get():
                 if event.type == "QUIT":
@@ -661,14 +724,10 @@ def main() -> None:
                         raise SystemExit()
                     elif K_0 <= event.sym <= K_9:
                         s_num = event.sym - K_0
-                        streaks = possible_streaks(matrix)
+                        streaks = c_possible_streaks()
                         if s_num < len(streaks):
                             streak = streaks[s_num]
-                            _, cx1, cy1 = streak[0]
-                            _, cx2, cy2 = streak[1]
-                            event_create(Swap([(cx1, cy1), (cx2, cy2)], CellState.SWAP))
-                            event_create(Animation([(cx1, cy1), (cx2, cy2)], CellState.ANIMATE,
-                                                   ["RED", "BLUE", "GREEN", "PURPLE"]))
+                            event_create(CSwap(streak))
                     else:
                         print(f"BAD KEY: {event}")
 
