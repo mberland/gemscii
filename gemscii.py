@@ -391,15 +391,11 @@ def c_matrix_fill() -> None:
         for i in range(MATRIX_WIDTH):
             for j in range(MATRIX_HEIGHT):
                 if c_state(i, j) == CellState.KILLED:
-                    # event_create(CDeath([Point(i, j)]))
-                    # print(f"K({i},{j})")
                     if j < (MATRIX_HEIGHT - 1):
-                        #event_create(CSwap([Point(i, j),Point(i,j+1)]))
                         c_set_gem(i, j, c_gem(i, j + 1))
                         c_set_gem(i, j + 1, new_gem())
                         event_create(CAnimation([Point(i, j),Point(i, j+1)], ["RED", "PINK"]))
                     else:
-                        #event_create(CBirth([Point(i,j)]))
                         c_set_gem(i, j, new_gem())
                         event_create(CAnimation([Point(i, j)], ["RED", "PINK"]))
 
