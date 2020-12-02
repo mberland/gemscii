@@ -10,10 +10,21 @@ from typing import Tuple, List, FrozenSet
 
 from tcod.event import K_9, K_0
 
+# CONSTANTS
+
 gems: str = "ABCDEF"
 MATRIX_WIDTH: int = 9
 MATRIX_HEIGHT: int = 4
 ANIMATION_LENGTH: int = 5
+WINDOW_WIDTH: int = MATRIX_WIDTH * 8
+WINDOW_HEIGHT: int = MATRIX_HEIGHT * 8
+X_BUFFER: int = int(WINDOW_WIDTH / (2 + MATRIX_WIDTH))
+Y_BUFFER: int = int(WINDOW_HEIGHT / (2 + MATRIX_HEIGHT))
+X_START: int = 2 * X_BUFFER
+Y_START: int = Y_BUFFER
+GLOBAL_EVENT_QUEUE = deque()
+
+# CLASSES and TYPES
 
 COLOR_MAP = dict(
     {"BLACK": (0, 0, 0),
@@ -37,24 +48,8 @@ class CellState(Enum):
     BORN = 11,
     MATCH = 12,
     ANIMATE = 13,
-    SWAP = 14
-
-
-COLORS = list(COLOR_MAP.keys())[2:]
-
-GLOBAL_EVENT_QUEUE = deque()
-
-
-def valid_x(x) -> bool:
-    return 0 <= x < MATRIX_WIDTH
-
-
-def valid_y(y) -> bool:
-    return 0 <= y < MATRIX_HEIGHT
-
-
-def new_gem() -> str:
-    return random.choice(gems)
+    SWAP = 14,
+    DYING = 15
 
 
 class Point:
@@ -132,7 +127,156 @@ CellMatrix = List[List[Cell]]
 ColorRGB = Tuple[int, int, int]
 SwapStreak = FrozenSet[Point]
 
+
+class Event:
+    def __init__(self, cells: List[Point], event_type: CellState, stage: int = 0):
+        self._cells = cells
+        self._event_type = event_type
+        self._completed = True
+        self._stage = stage
+        self._max_stage = ANIMATION_LENGTH
+
+    @property
+    def event_type(self) -> CellState:
+        return self._event_type
+
+    @property
+    def cells(self) -> List:
+        return self._cells
+
+    @property
+    def stage(self) -> int:
+        return self._stage
+
+    @property
+    def max_stage(self) -> int:
+        return self._max_stage
+
+    @stage.setter
+    def stage(self, stage: int) -> None:
+        self._stage = stage
+
+    def go(self) -> None:
+        self.stage += 1
+        print(self)
+
+    @property
+    def completed(self) -> bool:
+        if self.stage >= self.max_stage:
+            self._completed = True
+        return self._completed
+
+    @completed.setter
+    def completed(self, completed: bool) -> None:
+        self._completed = completed
+
+    def __str__(self) -> str:
+        return f"UNDEFINED EVENT: {self.event_type} {datetime.now()}"
+
+
+DEFAULT_EVENT = Event([], CellState.NO_EVENT)
+
+
+class CAnimation(Event):
+    def __init__(self, cells: List[Point], colors: List[str], stage: int = 0, max_stage: int = ANIMATION_LENGTH):
+        super().__init__(cells, CellState.ANIMATE)
+        self._colors = colors
+        self._stage = stage
+        self._max_stage = max_stage
+        self._completed = True
+
+    @property
+    def color(self) -> str:
+        output = self.colors[0]
+        self.colors = self.colors[1:] + self.colors[:1]
+        return output
+
+    @property
+    def colors(self) -> List[str]:
+        return self._colors
+
+    @colors.setter
+    def colors(self, colors: List[str]) -> None:
+        self._colors = colors
+
+    def go(self) -> None:
+        super().go()
+        for cell in self._cells:
+            c_set_colors(cell.x, cell.y, self.color)
+        if not self.completed:
+            event_create(CAnimation(self.cells, self.colors, self.stage + 1))
+
+    def __str__(self):
+        return f"ANIMATION ({[str(c) for c in self.cells]}) {self.stage} => {self.max_stage}: {self.colors}"
+
+
+class CSwap(Event):
+    def __init__(self, cells: List[Point], stage: int = 0):
+        super().__init__(cells, CellState.SWAP, stage)
+        self._max_stage = ANIMATION_LENGTH
+        event_create(CAnimation(self._cells, ["GREEN", "PURPLE"], stage))
+
+    def go(self):
+        super().go()
+        if not self.completed:
+            event_create(CSwap(self.cells, self.stage))
+        else:
+            c_complete_all_streaks()
+            assert 2 == len(self.cells), f"ERROR: CSwap was asked to swap this: {self.cells}"
+            c_swap_gems(tuple([cell for cell in self.cells]))
+
+
+class CBirth(Event):
+    def __init__(self, cells: List[Point], stage: int = 0):
+        super().__init__(cells, CellState.BORN, stage)
+        self._max_stage = ANIMATION_LENGTH
+        event_create(CAnimation(self._cells, ["CYAN", "PURPLE"], stage))
+
+    def go(self):
+        super().go()
+        if not self.completed:
+            event_create(CBirth(self.cells, self.stage))
+        else:
+            c_complete_all_streaks()
+            assert 1 == len(self.cells), f"ERROR: CBirth was asked to create this: {self.cells}"
+            p = self.cells[0]
+            c_set_gem(p.x,p.y,new_gem())
+
+class CMatch(Event):
+    def __init__(self, cells: List[Point], stage: int = 0):
+        super().__init__(cells, CellState.MATCH, stage)
+        event_create(CAnimation(self.cells, ["ORANGE", "PINK"], stage))
+
+    def go(self):
+        super().go()
+        if not self.completed:
+            event_create(CMatch(self.cells, self.stage))
+        else:
+            c_complete_all_streaks()
+            c_swap_gems(tuple([self.cells[0], self.cells[1]]))
+
+
+class CDeath(Event):
+    def __init__(self, cells: List[Point]):
+        super().__init__(cells, CellState.DYING)
+        event_create(CAnimation(self.cells, ["RED", "WHITE"]))
+
+
+# UTILITY FUNCTIONS
+
+def new_gem() -> str:
+    return random.choice(gems)
+
+
 GLOBAL_CELL_MATRIX: CellMatrix = [[Cell(i, j, new_gem()) for j in range(MATRIX_HEIGHT)] for i in range(MATRIX_WIDTH)]
+
+
+def valid_x(x) -> bool:
+    return 0 <= x < MATRIX_WIDTH
+
+
+def valid_y(y) -> bool:
+    return 0 <= y < MATRIX_HEIGHT
 
 
 def cm_cell(m: CellMatrix, x: int, y: int) -> Cell:
@@ -199,52 +343,7 @@ def c_reset_color_matrix(fg: str, bg: str) -> None:
             c_set_colors(i, j, fg, bg)
 
 
-class Event:
-    def __init__(self, cells: List, event_type: CellState, stage: int = 0):
-        self._cells = cells
-        self._event_type = event_type
-        self._completed = True
-        self._stage = stage
-        self._max_stage = ANIMATION_LENGTH
-
-    @property
-    def event_type(self) -> CellState:
-        return self._event_type
-
-    @property
-    def cells(self) -> List:
-        return self._cells
-
-    @property
-    def stage(self) -> int:
-        return self._stage
-
-    @property
-    def max_stage(self) -> int:
-        return self._max_stage
-
-    @stage.setter
-    def stage(self, stage: int) -> None:
-        self._stage = stage
-
-    def go(self) -> None:
-        self.stage += 1
-        print(self)
-
-    @property
-    def completed(self) -> bool:
-        return self._completed
-
-    @completed.setter
-    def completed(self, completed: bool) -> None:
-        self._completed = completed
-
-    def __str__(self) -> str:
-        return f"UNDEFINED EVENT: {self.event_type} {datetime.now()}"
-
-
-DEFAULT_EVENT = Event([], CellState.NO_EVENT)
-
+# GAME FUNCTIONS
 
 def event_create(event: Event) -> None:
     GLOBAL_EVENT_QUEUE.append(event)
@@ -256,37 +355,9 @@ def event_go() -> Event:
         event = GLOBAL_EVENT_QUEUE.popleft()
         event.go()
         return event
-    c_reset_color_matrix("WHITE", "BLACK")
+    else:
+        c_reset_color_matrix("WHITE", "BLACK")
     return DEFAULT_EVENT
-
-
-class CAnimation(Event):
-    def __init__(self, cells: List[Point], colors: List, stage: int = 0):
-        super().__init__(cells, CellState.ANIMATE)
-        self._colors = colors
-        self._stage = stage
-        self._max_stage = ANIMATION_LENGTH
-        self._completed = True
-
-    @property
-    def color(self) -> str:
-        output = self._colors[0]
-        self._colors = self._colors[1:] + self._colors[:1]
-        return output
-
-    @property
-    def colors(self):
-        return self._colors
-
-    def go(self):
-        super().go()
-        for cell in self._cells:
-            c_set_colors(cell.x, cell.y, self.color)
-        if self._stage < self._max_stage:
-            event_create(CAnimation(self.cells, self.colors, self.stage + 1))
-
-    def __str__(self):
-        return f"ANIMATION ({[str(c) for c in self.cells]}) {self.stage} => {self.max_stage}: {self.colors}"
 
 
 def cm_matrix_streaks(m: CellMatrix) -> List[FrozenSet[Point]]:
@@ -320,12 +391,17 @@ def c_matrix_fill() -> None:
         for i in range(MATRIX_WIDTH):
             for j in range(MATRIX_HEIGHT):
                 if c_state(i, j) == CellState.KILLED:
-                    print(f"KILLED: ({i},{j})")
+                    # event_create(CDeath([Point(i, j)]))
+                    # print(f"K({i},{j})")
                     if j < (MATRIX_HEIGHT - 1):
+                        #event_create(CSwap([Point(i, j),Point(i,j+1)]))
                         c_set_gem(i, j, c_gem(i, j + 1))
-                        c_set_gem(i, j, new_gem())
+                        c_set_gem(i, j + 1, new_gem())
+                        event_create(CAnimation([Point(i, j),Point(i, j+1)], ["RED", "PINK"]))
                     else:
+                        #event_create(CBirth([Point(i,j)]))
                         c_set_gem(i, j, new_gem())
+                        event_create(CAnimation([Point(i, j)], ["RED", "PINK"]))
 
 
 def c_update_from_streak(streak: FrozenSet[Point]) -> None:
@@ -371,52 +447,6 @@ def c_possible_streaks() -> List[FrozenSet[Point]]:
             if len(cm_matrix_streaks(neighbor_switch_matrix)) > 0:
                 candidates.add(frozenset([p, n]))
     return sorted([c for c in candidates])
-
-
-class CSwap(Event):
-    def __init__(self, cells: List, stage: int = 0):
-        super().__init__(cells, CellState.SWAP, stage)
-        self._max_stage = ANIMATION_LENGTH
-
-    def go(self):
-        super().go()
-        if 0 == self.stage:
-            event_create(CAnimation(self._cells, ["GREEN", "PURPLE"]))
-        if self.stage < self.max_stage:
-            self.stage += 1
-            event_create(CSwap(self.cells, self.stage))
-        else:
-            c_complete_all_streaks()
-            assert 2 == len(self.cells), f"ERROR: CSwap was asked to swap this: {self.cells}"
-            c_swap_gems(tuple([cell for cell in self.cells]))
-
-
-class CMatch(Event):
-    def __init__(self, cells: List, stage: int = 0):
-        super().__init__(cells, CellState.MATCH, stage)
-
-    def go(self):
-        super().go()
-        if self.stage < self.max_stage:
-            event_create(CAnimation(self._cells, ["ORANGE", "PINK"]))
-            event_create(CMatch(self._cells, self._stage))
-        else:
-            c_complete_all_streaks()
-            c_swap_gems(tuple([self._cells[0], self._cells[1]]))
-
-
-class CDeath(Event):
-    def __init__(self, cells: List, event_type: CellState):
-        super().__init__(cells, event_type)
-        assert False, "CDeath UNIMPLEMENTED"
-
-
-WINDOW_WIDTH = MATRIX_WIDTH * 8
-WINDOW_HEIGHT = MATRIX_HEIGHT * 8
-X_BUFFER: int = int(WINDOW_WIDTH / (2 + MATRIX_WIDTH))
-Y_BUFFER: int = int(WINDOW_HEIGHT / (2 + MATRIX_HEIGHT))
-X_START: int = 2 * X_BUFFER
-Y_START: int = Y_BUFFER
 
 
 def ij_to_window_xy(cx: int, cy: int) -> Tuple[int, int]:
@@ -493,8 +523,7 @@ def main() -> None:
                         streaks = c_possible_streaks()
                         if s_num < len(streaks):
                             print(f"SELECTED: STREAK {s_num}")
-                            streak = streaks[s_num]
-                            event_create(CSwap(streak))
+                            event_create(CSwap(list(streaks[s_num])))
                     else:
                         print(f"BAD KEY: {event}")
 
