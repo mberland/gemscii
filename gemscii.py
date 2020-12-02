@@ -563,13 +563,14 @@ class CSwap(Event):
 
     def go(self):
         super().go()
-        if self._stage < self._max_stage:
-            self._stage += 1
+        if 0 == self.stage:
             event_create(CAnimation(self._cells, ["GREEN", "PURPLE"]))
-            event_create(CSwap(self._cells, self._stage))
+        if self.stage < self.max_stage:
+            self.stage += 1
+            event_create(CSwap(self.cells, self.stage))
         else:
             c_complete_all_streaks()
-            assert 2 == len(self._cells), f"ERROR: CSwap was asked to swap this: {self._cells}"
+            assert 2 == len(self.cells), f"ERROR: CSwap was asked to swap this: {self.cells}"
             c_swap_gems(tuple([cell for cell in self.cells]))
 
 
