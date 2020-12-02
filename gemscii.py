@@ -171,7 +171,7 @@ class Event:
         self._completed = completed
 
     def __str__(self) -> str:
-        return f"UNDEFINED EVENT: {self.event_type} {datetime.now()}"
+        return f"EVENT: {self.event_type} {datetime.now()}"
 
 
 DEFAULT_EVENT = Event([], CellState.NO_EVENT)
@@ -241,6 +241,7 @@ class CBirth(Event):
             assert 1 == len(self.cells), f"ERROR: CBirth was asked to create this: {self.cells}"
             p = self.cells[0]
             c_set_gem(p.x,p.y,new_gem())
+
 
 class CMatch(Event):
     def __init__(self, cells: List[Point], stage: int = 0):
@@ -394,7 +395,7 @@ def c_matrix_fill() -> None:
                     if j < (MATRIX_HEIGHT - 1):
                         c_set_gem(i, j, c_gem(i, j + 1))
                         c_set_gem(i, j + 1, new_gem())
-                        event_create(CAnimation([Point(i, j),Point(i, j+1)], ["RED", "PINK"]))
+                        # ideally, things should not disappear instantly - they should animate then die!
                     else:
                         c_set_gem(i, j, new_gem())
                         event_create(CAnimation([Point(i, j)], ["RED", "PINK"]))
@@ -402,6 +403,7 @@ def c_matrix_fill() -> None:
 
 def c_update_from_streak(streak: FrozenSet[Point]) -> None:
     for p in streak:
+        event_create(CAnimation([p], ["ORANGE", "YELLOW"], 1, 3))
         c_set_state(p.x, p.y, CellState.KILLED)
 
 
@@ -429,7 +431,6 @@ def c_complete_all_streaks() -> None:
 
 
 def c_possible_streaks() -> List[FrozenSet[Point]]:
-    # assert False, "c_possible_streaks() UNIMPLEMENTED"
     candidates = set()
     c_complete_all_streaks()
     deltas = [Point(i, j) for i in range(-1, 2) for j in range(-1, 2) if abs(i) != abs(j)]
@@ -501,7 +502,7 @@ def main() -> None:
             if CellState.NO_EVENT == event.event_type:
                 print(".", end="")
             else:
-                print(f"MAIN LOOP EVENT: {event} [OPTIONS: {len(c_possible_streaks())}]")
+                print(f"{event} [OPTIONS: {len(c_possible_streaks())}]")
             c_complete_all_streaks()
             c_matrix_fill()
             c_matrix_tcod(console)
